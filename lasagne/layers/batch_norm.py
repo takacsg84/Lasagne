@@ -10,14 +10,15 @@ Author: Jan SchlÃ¼ter
 """
 
 import numpy as np
-import lasagne
 import theano
 import theano.tensor as T
+from .. import nonlinearities
+from .base import Layer
 
 
-class BatchNormLayer(lasagne.layers.Layer):
+class BatchNormLayer(Layer):
 
-    def __init__(self, incoming, axes=None, epsilon=0.01, alpha=0.5,
+    def __init__(self, incoming, axes=None, epsilon=0.01, alpha=0.05,
                  nonlinearity=None, **kwargs):
         """
         Instantiates a layer performing batch normalization of its inputs,
@@ -43,8 +44,9 @@ class BatchNormLayer(lasagne.layers.Layer):
         self.axes = axes
         self.epsilon = epsilon
         self.alpha = alpha
+        self.inference_updates = None
         if nonlinearity is None:
-            nonlinearity = lasagne.nonlinearities.identity
+            nonlinearity = nonlinearities.identity
         self.nonlinearity = nonlinearity
         shape = list(self.input_shape)
         broadcast = [False] * len(shape)
@@ -55,6 +57,8 @@ class BatchNormLayer(lasagne.layers.Layer):
             raise ValueError("BatchNormLayer needs specified input sizes for "
                              "all dimensions/axes not normalized over.")
         dtype = theano.config.floatX
+        self.count = theano.shared(np.dtype(theano.config.floatX).type(0),
+                                   'count')
         self.mean = theano.shared(np.zeros(shape, dtype=dtype), 'mean')
         self.std = theano.shared(np.ones(shape, dtype=dtype), 'std')
         self.beta = theano.shared(np.zeros(shape, dtype=dtype), 'beta')
@@ -88,6 +92,7 @@ class BatchNormLayer(lasagne.layers.Layer):
             # applied (although the expressions will be optimized away later)
             mean += 0 * running_mean
             std += 0 * running_std
+
         std += self.epsilon
         mean = T.addbroadcast(mean, *self.axes)
         std = T.addbroadcast(std, *self.axes)
@@ -95,6 +100,25 @@ class BatchNormLayer(lasagne.layers.Layer):
         gamma = T.addbroadcast(self.gamma, *self.axes)
         normalized = (input - mean) * (gamma / std) + beta
         return self.nonlinearity(normalized)
+
+    def additional_updates(self, input=None, **kwargs):
+        kwargs['deterministic'] = True
+        input = self.input_layer.get_output(input, **kwargs)
+        mean = input.mean(self.axes, keepdims=True)
+        std = input.std(self.axes, keepdims=True)
+
+        new_count = self.count + 1
+        new_mean = (self.mean * self.count + mean) / new_count
+        new_std = (self.std * self.count + std) / new_count
+        return[(self.mean, new_mean),
+               (self.std, new_std),
+               (self.count, new_count)]
+
+    def reset(self):
+        dtype = theano.config.floatX
+        shape = self.mean.get_value().shape
+        self.mean = theano.shared(np.zeros(shape, dtype=dtype), 'mean')
+        self.std = theano.shared(np.ones(shape, dtype=dtype), 'std')
 
 
 def batch_norm(layer):
@@ -110,7 +134,7 @@ def batch_norm(layer):
     """
     nonlinearity = getattr(layer, 'nonlinearity', None)
     if nonlinearity is not None:
-        layer.nonlinearity = lasagne.nonlinearities.identity
+        layer.nonlinearity = nonlinearities.identity
     if hasattr(layer, 'b'):
         layer.b = None
     return BatchNormLayer(layer, nonlinearity=nonlinearity)
