@@ -9,3 +9,4 @@ from .shape import *
 from .merge import *
 from .normalization import *
 from .batch_norm import *
+from .linear import *
