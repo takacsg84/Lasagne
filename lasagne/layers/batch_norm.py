@@ -18,7 +18,7 @@ from .base import Layer
 
 class BatchNormLayer(Layer):
 
-    def __init__(self, incoming, axes=None, epsilon=0.01, alpha=0.05,
+    def __init__(self, incoming, axes=None, epsilon=0.01, alpha=0.5,
                  nonlinearity=None, **kwargs):
         """
         Instantiates a layer performing batch normalization of its inputs,
@@ -59,10 +59,10 @@ class BatchNormLayer(Layer):
         dtype = theano.config.floatX
         self.count = theano.shared(np.dtype(theano.config.floatX).type(0),
                                    'count')
-        self.mean = theano.shared(np.zeros(shape, dtype=dtype), 'mean')
-        self.std = theano.shared(np.ones(shape, dtype=dtype), 'std')
-        self.beta = theano.shared(np.zeros(shape, dtype=dtype), 'beta')
-        self.gamma = theano.shared(np.ones(shape, dtype=dtype), 'gamma')
+        self.mean = theano.shared(np.zeros(shape, dtype=dtype), 'bn_mean')
+        self.std = theano.shared(np.ones(shape, dtype=dtype), 'bn_std')
+        self.beta = theano.shared(np.zeros(shape, dtype=dtype), 'bn_beta')
+        self.gamma = theano.shared(np.ones(shape, dtype=dtype), 'bn_gamma')
 
     def get_params(self):
         return [self.gamma] + self.get_bias_params()
@@ -70,28 +70,34 @@ class BatchNormLayer(Layer):
     def get_bias_params(self):
         return [self.beta]
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
-        if deterministic:
+    def get_state(self):
+        return [self.gamma, self.beta, self.mean, self.std]
+
+    def get_output_for(self, input, deterministic=False,
+                       debug=False, **kwargs):
+        if not debug and deterministic:
             # use stored mean and std
             mean = self.mean
             std = self.std
-        else:
+        else:  # if debug or not determ
             # use this batch's mean and std
             mean = input.mean(self.axes, keepdims=True)
             std = input.std(self.axes, keepdims=True)
-            # and update the stored mean and std:
-            # we create (memory-aliased) clones of the stored mean and std
-            running_mean = theano.clone(self.mean, share_inputs=False)
-            running_std = theano.clone(self.std, share_inputs=False)
-            # set a default update for them
-            running_mean.default_update = ((1 - self.alpha) * running_mean +
-                                           self.alpha * mean)
-            running_std.default_update = ((1 - self.alpha) * running_std +
-                                          self.alpha * std)
-            # and include them in the graph so their default updates will be
-            # applied (although the expressions will be optimized away later)
-            mean += 0 * running_mean
-            std += 0 * running_std
+            if not debug:
+                # and update the stored mean and std:
+                # we create (memory-aliased) clones of the stored mean and std
+                running_mean = theano.clone(self.mean, share_inputs=False)
+                running_std = theano.clone(self.std, share_inputs=False)
+                # set a default update for them
+                running_mean.default_update = ((1 - self.alpha) * running_mean +
+                                               self.alpha * mean)
+                running_std.default_update = ((1 - self.alpha) * running_std +
+                                              self.alpha * std)
+                # and include them in the graph so their default updates will be
+                # applied (although the expressions will be optimized away
+                # later)
+                mean += 0 * running_mean
+                std += 0 * running_std
 
         std += self.epsilon
         mean = T.addbroadcast(mean, *self.axes)
@@ -117,8 +123,9 @@ class BatchNormLayer(Layer):
     def reset(self):
         dtype = theano.config.floatX
         shape = self.mean.get_value().shape
-        self.mean = theano.shared(np.zeros(shape, dtype=dtype), 'mean')
-        self.std = theano.shared(np.ones(shape, dtype=dtype), 'std')
+        self.count.set_value(0)
+        self.mean.set_value(np.zeros(shape, dtype=dtype))
+        self.std.set_value(np.ones(shape, dtype=dtype))
 
 
 def batch_norm(layer):
