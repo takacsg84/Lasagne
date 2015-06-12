@@ -29,7 +29,7 @@ def l2(x):
     Theano scalar
         squared l2 norm (sum of squared values of elements)
     """
-    return T.sum(x**2)
+    return T.sum(x ** 2)
 
 
 def apply_penalty(tensor_or_tensors, penalty, **kwargs):
