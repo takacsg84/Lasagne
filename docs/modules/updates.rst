@@ -1,5 +1,5 @@
 :mod:`lasagne.updates`
-=====================
+======================
 
 .. automodule:: lasagne.updates
 
@@ -13,9 +13,18 @@ Update functions
 .. autofunction:: adagrad
 .. autofunction:: rmsprop
 .. autofunction:: adadelta
+.. autofunction:: adam
 
 
-Other functions
----------------
+Update modification functions
+-----------------------------
+
+.. autofunction:: apply_momentum
+.. autofunction:: apply_nesterov_momentum
+
+
+Helper functions
+----------------
 
 .. autofunction:: norm_constraint
+.. autofunction:: total_norm_constraint

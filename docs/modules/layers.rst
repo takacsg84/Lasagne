@@ -7,6 +7,8 @@
 Helper functions
 ----------------
 
+.. autofunction:: get_output
+.. autofunction:: get_output_shape
 .. autofunction:: get_all_layers
 .. autofunction:: get_all_params
 .. autofunction:: get_all_bias_params
@@ -22,7 +24,7 @@ Layer base classes
 .. autoclass:: Layer
    :members:
 
-.. autoclass:: MultipleInputsLayer
+.. autoclass:: MergeLayer
     :members:
 
 Layer classes: network input
@@ -35,6 +37,9 @@ Layer classes: dense layers
 ---------------------------
 
 .. autoclass:: DenseLayer
+   :members:
+
+.. autoclass:: NonlinearityLayer
    :members:
 
 .. autoclass:: NINLayer
@@ -51,6 +56,9 @@ Layer classes: convolutional layers
 
 Layer classes: pooling layers
 -----------------------------
+
+.. autoclass:: MaxPool1DLayer
+    :members:
 
 .. autoclass:: MaxPool2DLayer
     :members:
@@ -104,9 +112,14 @@ Layer classes: merge layers
 .. autoclass:: ElemwiseSumLayer
     :members:
 
+Layer classes: embedding layers
+---------------------------
+
+.. autoclass:: EmbeddingLayer
+    :members:
 
 :mod:`lasagne.layers.corrmm`
-==================================
+============================
 
 .. automodule:: lasagne.layers.corrmm
     :members:
@@ -120,7 +133,7 @@ Layer classes: merge layers
 
 
 :mod:`lasagne.layers.dnn`
-==================================
+=========================
 
 .. automodule:: lasagne.layers.dnn
     :members:

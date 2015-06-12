@@ -7,7 +7,8 @@ import pytest
 class TestDropoutLayer:
     @pytest.fixture(params=[(100, 100), (None, 100)])
     def input_layer(self, request):
-        return Mock(get_output_shape=lambda: request.param)
+        from lasagne.layers.input import InputLayer
+        return InputLayer(request.param)
 
     @pytest.fixture
     def layer(self, input_layer):
@@ -56,7 +57,7 @@ class TestGaussianNoiseLayer:
     @pytest.fixture
     def layer(self):
         from lasagne.layers.noise import GaussianNoiseLayer
-        return GaussianNoiseLayer(Mock())
+        return GaussianNoiseLayer(Mock(output_shape=(None,)))
 
     def test_get_output_for_non_deterministic(self, layer):
         input = theano.shared(numpy.ones((100, 100)))

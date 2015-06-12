@@ -83,17 +83,19 @@ class TestLocalResponseNormalization2DLayer:
         return np.random.RandomState([2013, 2])
 
     @pytest.fixture
-    def input_data(self, input_layer, rng):
-        return rng.randn(*input_layer.shape).astype(theano.config.floatX)
-
-    @pytest.fixture
-    def input_layer(self):
-        from lasagne.layers.input import InputLayer
+    def input_data(self, rng):
         channels = 15
         rows = 3
         cols = 4
         batch_size = 2
         shape = (batch_size, channels, rows, cols)
+        return rng.randn(*shape).astype(theano.config.floatX)
+
+    @pytest.fixture
+    def input_layer(self, input_data):
+        from lasagne.layers.input import InputLayer
+        shape = list(input_data.shape)
+        shape[0] = None
         return InputLayer(shape)
 
     @pytest.fixture
@@ -110,14 +112,21 @@ class TestLocalResponseNormalization2DLayer:
         return layer
 
     def test_get_params(self, layer):
-        assert len(layer.get_params()) == 0
+        assert layer.get_params() == []
 
-    def test_get_bias_params(self, layer):
-        assert len(layer.get_bias_params()) == 0
+    def test_get_output_shape_for(self, layer):
+        assert layer.get_output_shape_for((1, 2, 3, 4)) == (1, 2, 3, 4)
+
+    def test_even_n_fails(self, input_layer):
+        from lasagne.layers.normalization import\
+                LocalResponseNormalization2DLayer
+
+        with pytest.raises(NotImplementedError):
+            LocalResponseNormalization2DLayer(input_layer, n=4)
 
     def test_normalization(self, input_data, input_layer, layer):
         X = input_layer.input_var
-        lrn = theano.function([X], layer.get_output(X))
+        lrn = theano.function([X], lasagne.layers.get_output(layer, X))
         out = lrn(input_data)
 
         # ground_truth_normalizer assumes c01b

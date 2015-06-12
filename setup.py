@@ -2,7 +2,7 @@ import os
 from setuptools import find_packages
 from setuptools import setup
 
-version = '0.1dev'
+version = '0.1.dev'
 
 here = os.path.abspath(os.path.dirname(__file__))
 try:
@@ -24,10 +24,6 @@ tests_require = [
     'pytest-pep8',
     ]
 
-docs_require = [
-    'Sphinx',
-    ]
-
 setup(
     name="Lasagne",
     version=version,
@@ -35,13 +31,18 @@ setup(
     long_description="\n\n".join([README, CHANGES]),
     classifiers=[
         "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.4",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
         ],
     keywords="",
     author="Sander Dieleman",
     author_email="sanderdieleman@gmail.com",
-    url="https://github.com/benanne/lasagne",
+    url="https://github.com/Lasagne/Lasagne",
     license="MIT",
     packages=find_packages(),
     include_package_data=True,
@@ -49,6 +50,5 @@ setup(
     install_requires=install_requires,
     extras_require={
         'testing': tests_require,
-        'docs': docs_require,
         },
     )

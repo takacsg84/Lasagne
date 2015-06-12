@@ -1,4 +1,5 @@
 import numpy as np
+import theano.tensor as T
 
 from ..theano_extensions import padding
 
@@ -14,10 +15,18 @@ __all__ = [
     "dimshuffle",
     "PadLayer",
     "pad",
+    "SliceLayer"
 ]
 
 
 class FlattenLayer(Layer):
+    """
+    Flatten all but the first dimension.
+
+    See Also
+    --------
+    flatten  : Shortcut
+    """
     def get_output_shape_for(self, input_shape):
         return (input_shape[0], int(np.prod(input_shape[1:])))
 
@@ -32,35 +41,41 @@ class ReshapeLayer(Layer):
     A layer reshaping its input tensor to another tensor of the same total
     number of elements.
 
-    :parameters:
-        - incoming : a :class:`Layer` instance or a tuple
-            the layer feeding into this layer, or the expected input shape
+    Parameters
+    ----------
+    incoming : a :class:`Layer` instance or a tuple
+        The layer feeding into this layer, or the expected input shape
 
-        - shape : tuple
-            The target shape specification. Any of its elements can be `[i]`,
-            a single-element list of int, denoting to use the size of the ith
-            input dimension. At most one element can be `-1`, denoting to
-            infer the size for this dimension to match the total number of
-            elements of the input tensor. Any remaining elements must be
-            positive integers directly giving the size of the corresponding
-            dimension.
+    shape : tuple
+        The target shape specification. Each element can be one of:
 
-    :usage:
-        >>> from lasagne.layers import InputLayer, ReshapeLayer
-        >>> l_in = InputLayer((None, 100, 20))
-        >>> l1 = ReshapeLayer(l_in, ([0], [1], 2, 10))
-        >>> l1.get_output_shape()
-        (None, 100, 2, 10)
-        >>> l2 = ReshapeLayer(l_in, ([0], 1, 2, 5, -1))
-        >>> l2.get_output_shape()
-        (None, 1, 2, 5, 200)
+        * ``i``, a positive integer directly giving the size of the dimension
+        * ``[i]``, a single-element list of int, denoting to use the size
+          of the ``i`` th input dimension
+        * ``-1``, denoting to infer the size for this dimension to match
+          the total number of elements in the input tensor (cannot be used
+          more than once in a specification)
+        * TensorVariable directly giving the size of the dimension
 
-    :note:
-        The tensor elements will be fetched and placed in C-like order. That
-        is, reshaping `[1,2,3,4,5,6]` to shape `(2,3)` will result in a matrix
-        `[[1,2,3],[4,5,6]]`, not in `[[1,3,5],[2,4,6]]` (Fortran-like order),
-        regardless of the memory layout of the input tensor. For C-contiguous
-        input, reshaping is cheap, for others it may require copying the data.
+    Examples
+    --------
+    >>> from lasagne.layers import InputLayer, ReshapeLayer
+    >>> l_in = InputLayer((32, 100, 20))
+    >>> l1 = ReshapeLayer(l_in, ((32, 50, 40)))
+    >>> l1.output_shape
+    (32, 50, 40)
+    >>> l_in = InputLayer((None, 100, 20))
+    >>> l1 = ReshapeLayer(l_in, ([0], [1], 5, -1))
+    >>> l1.output_shape
+    (None, 100, 5, 4)
+
+    Notes
+    -----
+    The tensor elements will be fetched and placed in C-like order. That
+    is, reshaping `[1,2,3,4,5,6]` to shape `(2,3)` will result in a matrix
+    `[[1,2,3],[4,5,6]]`, not in `[[1,3,5],[2,4,6]]` (Fortran-like order),
+    regardless of the memory layout of the input tensor. For C-contiguous
+    input, reshaping is cheap, for others it may require copying the data.
     """
 
     def __init__(self, incoming, shape, **kwargs):
@@ -74,11 +89,18 @@ class ReshapeLayer(Layer):
                 if len(s) != 1 or not isinstance(s[0], int) or s[0] < 0:
                     raise ValueError("`shape` input references must be "
                                      "single-element lists of int >= 0")
+            elif isinstance(s, T.TensorVariable):
+                if s.ndim != 0:
+                    raise ValueError(
+                        "A symbolic variable in a shape specification must be "
+                        "a scalar, but had %i dimensions" % s.ndim)
             else:
                 raise ValueError("`shape` must be a tuple of int and/or [int]")
         if sum(s == -1 for s in shape) > 1:
             raise ValueError("`shape` cannot contain multiple -1")
         self.shape = shape
+        # try computing the output shape once as a sanity check
+        self.get_output_shape_for(self.input_shape)
 
     def get_output_shape_for(self, input_shape, **kwargs):
         # Initialize output shape from shape specification
@@ -103,6 +125,12 @@ class ReshapeLayer(Layer):
                         # it is unknown.
                         masked_input_shape[o[0]] = 1
                         masked_output_shape[dim] = 1
+        # Secondly, replace all symbolic shapes with `None`, as we cannot
+        # infer their size here.
+        for dim, o in enumerate(output_shape):
+            if isinstance(o, T.TensorVariable):
+                output_shape[dim] = None
+                masked_output_shape[dim] = None
         # From the shapes, compute the sizes of the input and output tensor
         input_size = (None if any(x is None for x in masked_input_shape)
                       else np.prod(masked_input_shape))
@@ -144,34 +172,40 @@ class DimshuffleLayer(Layer):
     A layer that rearranges the dimension of its input tensor, maintaining
     the same same total number of elements.
 
-    :parameters:
-        - incoming : a :class:`Layer` instance or a tuple
-            the layer feeding into this layer, or the expected input shape
+    Parameters
+    ----------
+    incoming : a :class:`Layer` instance or a tuple
+        the layer feeding into this layer, or the expected input shape
 
-        - pattern : tuple
-            The new dimension order, with each element giving the index
-            of the dimension in the input tensor or `'x'` to broadcast it.
-            For example `(3,2,1,0)` will reverse the order of a 4-dimensional
-            tensor. Use `'x'` to broadcast, e.g. `(3,2,1,'x',0)` will
-            take a 4 tensor of shape `(2,3,5,7)` as input and produce a
-            tensor of shape `(7,5,3,1,2)` with the 4th dimension being
-            broadcast-able. In general, all dimensions in the input tensor
-            must be used to generate the output tensor. Omitting a dimension
-            attempts to collapse it; this can only be done to broadcast-able
-            dimensions, e.g. a 5-tensor of shape `(7,5,3,1,2)` with the 4th
-            being broadcast-able can be shuffled with the pattern `(4,2,1,0)`
-            collapsing the 4th dimension resulting in a tensor of shape
-            `(2,3,5,7)`.
+    pattern : tuple
+        The new dimension order, with each element giving the index
+        of the dimension in the input tensor or `'x'` to broadcast it.
+        For example `(3,2,1,0)` will reverse the order of a 4-dimensional
+        tensor. Use `'x'` to broadcast, e.g. `(3,2,1,'x',0)` will
+        take a 4 tensor of shape `(2,3,5,7)` as input and produce a
+        tensor of shape `(7,5,3,1,2)` with the 4th dimension being
+        broadcast-able. In general, all dimensions in the input tensor
+        must be used to generate the output tensor. Omitting a dimension
+        attempts to collapse it; this can only be done to broadcast-able
+        dimensions, e.g. a 5-tensor of shape `(7,5,3,1,2)` with the 4th
+        being broadcast-able can be shuffled with the pattern `(4,2,1,0)`
+        collapsing the 4th dimension resulting in a tensor of shape
+        `(2,3,5,7)`.
 
-    :usage:
-        >>> from lasagne.layers import InputLayer, DimshuffleLayer
-        >>> l_in = InputLayer((2, 3, 5, 7))
-        >>> l1 = DimshuffleLayer(l_in, (3, 2, 1, 'x', 0))
-        >>> l1.get_output_shape()
-        (7, 5, 3, 1, 2)
-        >>> l2 = DimshuffleLayer(l1, (4, 2, 1, 0))
-        >>> l2.get_output_shape()
-        (2, 3, 5, 7)
+    Examples
+    --------
+    >>> from lasagne.layers import InputLayer, DimshuffleLayer
+    >>> l_in = InputLayer((2, 3, 5, 7))
+    >>> l1 = DimshuffleLayer(l_in, (3, 2, 1, 'x', 0))
+    >>> l1.output_shape
+    (7, 5, 3, 1, 2)
+    >>> l2 = DimshuffleLayer(l1, (4, 2, 1, 0))
+    >>> l2.output_shape
+    (2, 3, 5, 7)
+
+    See Also
+    --------
+    dimshuffle : Shortcut
     """
     def __init__(self, incoming, pattern, **kwargs):
         super(DimshuffleLayer, self).__init__(incoming, **kwargs)
@@ -194,6 +228,9 @@ class DimshuffleLayer(Layer):
 
         self.pattern = pattern
 
+        # try computing the output shape once as a sanity check
+        self.get_output_shape_for(self.input_shape)
+
     def get_output_shape_for(self, input_shape):
         # Build output shape while keeping track of the dimensions that we are
         # attempting to collapse, so we can ensure that they are broadcastable
@@ -211,9 +248,6 @@ class DimshuffleLayer(Layer):
             elif p == 'x':
                 # Broadcast; will be of size 1
                 o = 1
-            else:
-                raise RuntimeError("invalid pattern entry, should have "
-                                   "caught in the constructor")
             output_shape.append(o)
 
         for i, (dim_size, used) in enumerate(zip(input_shape, dims_used)):
@@ -233,6 +267,30 @@ dimshuffle = DimshuffleLayer  # shortcut
 
 
 class PadLayer(Layer):
+    """
+    Pad all dimensions except the first 'batch_ndim' with 'width'
+    zeros on both sides, or with another value specified in 'val'.
+
+    Parameters
+    ----------
+    incoming : a :class:`Layer` instance or a tuple
+        The layer feeding into this layer, or the expected input shape
+
+    width : int
+        Padding width
+
+    val : float
+        Value used for padding
+
+    batch_ndim : int
+        Dimensions up to this value are not padded. For padding convolutional
+        layers this should be set to 2 so the sample and filter dimensions are
+        not padded
+
+    See Also
+    --------
+    pad : Shortcut
+    """
     def __init__(self, incoming, width, val=0, batch_ndim=2, **kwargs):
         super(PadLayer, self).__init__(incoming, **kwargs)
         self.width = width
@@ -253,3 +311,55 @@ class PadLayer(Layer):
         return padding.pad(input, self.width, self.val, self.batch_ndim)
 
 pad = PadLayer  # shortcut
+
+
+class SliceLayer(Layer):
+    """
+    Slices the input at a specific axis and at specific indices.
+
+    Parameters
+    ----------
+    incoming : a :class:`Layer` instance or a tuple
+        The layer feeding into this layer, or the expected input shape
+
+    indices : int or slice instance
+        If an ``int``, selects a single element from the given axis, dropping
+        the axis. If a slice, selects all elements in the given range, keeping
+        the axis.
+
+    axis : int
+        Specifies the axis from which the indices are selected.
+
+    Examples
+    --------
+    >>> from lasagne.layers import SliceLayer, InputLayer
+    >>> l_in = InputLayer((2, 3, 4))
+    >>> SliceLayer(l_in, indices=0, axis=1).output_shape
+    ... # equals input[:, 0]
+    (2, 4)
+    >>> SliceLayer(l_in, indices=slice(0, 1), axis=1).output_shape
+    ... # equals input[:, 0:1]
+    (2, 1, 4)
+    >>> SliceLayer(l_in, indices=slice(-2, None), axis=-1).output_shape
+    ... # equals input[..., -2:]
+    (2, 3, 2)
+    """
+    def __init__(self, incoming, indices, axis=-1, **kwargs):
+        super(SliceLayer, self).__init__(incoming, **kwargs)
+        self.slice = indices
+        self.axis = axis
+
+    def get_output_shape_for(self, input_shape):
+        output_shape = list(input_shape)
+        if isinstance(self.slice, int):
+            del output_shape[self.axis]
+        else:
+            output_shape[self.axis] = len(
+                range(*self.slice.indices(input_shape[self.axis])))
+        return tuple(output_shape)
+
+    def get_output_for(self, input):
+        axis = self.axis
+        if axis < 0:
+            axis += input.ndim
+        return input[(slice(None),) * axis + (self.slice,)]

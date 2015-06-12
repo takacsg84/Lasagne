@@ -8,48 +8,19 @@ class TestLayer:
     @pytest.fixture
     def layer(self):
         from lasagne.layers.base import Layer
-        return Layer(Mock())
+        return Layer(Mock(output_shape=(None,)))
+
+    @pytest.fixture
+    def named_layer(self):
+        from lasagne.layers.base import Layer
+        return Layer(Mock(output_shape=(None,)), name='layer_name')
 
     def test_input_shape(self, layer):
-        assert layer.input_shape == layer.input_layer.get_output_shape()
+        assert layer.input_shape == layer.input_layer.output_shape
 
-    def test_get_output_shape(self, layer):
-        assert layer.get_output_shape() == layer.input_layer.get_output_shape()
-
-    def test_get_output_without_arguments(self, layer):
-        layer.get_output_for = Mock()
-
-        output = layer.get_output()
-        assert output is layer.get_output_for.return_value
-        layer.get_output_for.assert_called_with(
-            layer.input_layer.get_output.return_value)
-        layer.input_layer.get_output.assert_called_with(None)
-
-    def test_get_output_passes_on_arguments_to_input_layer(self, layer):
-        input, kwarg = object(), object()
-        layer.get_output_for = Mock()
-
-        output = layer.get_output(input, kwarg=kwarg)
-        assert output is layer.get_output_for.return_value
-        layer.get_output_for.assert_called_with(
-            layer.input_layer.get_output.return_value, kwarg=kwarg)
-        layer.input_layer.get_output.assert_called_with(
-            input, kwarg=kwarg)
-
-    def test_get_output_input_is_a_mapping(self, layer):
-        input = {layer: theano.tensor.matrix()}
-        assert layer.get_output(input) is input[layer]
-
-    def test_get_output_input_is_a_mapping_no_key(self, layer):
-        layer.get_output_for = Mock()
-
-        output = layer.get_output({})
-        assert output is layer.get_output_for.return_value
-
-    def test_get_output_input_is_a_mapping_to_array(self, layer):
-        input = {layer: [[1, 2, 3]]}
-        output = layer.get_output(input)
-        assert numpy.all(output.eval() == input[layer])
+    def test_get_output_shape_for(self, layer):
+        shape = Mock()
+        assert layer.get_output_shape_for(shape) == shape
 
     @pytest.fixture
     def layer_from_shape(self):
@@ -60,145 +31,117 @@ class TestLayer:
         layer = layer_from_shape
         assert layer.input_layer is None
         assert layer.input_shape == (None, 20)
-        assert layer.get_output_shape() == (None, 20)
 
-    def test_layer_from_shape_invalid_get_output(self, layer_from_shape):
-        layer = layer_from_shape
-        with pytest.raises(RuntimeError):
-            layer.get_output()
-        with pytest.raises(RuntimeError):
-            layer.get_output(Mock())
-        with pytest.raises(RuntimeError):
-            layer.get_output({Mock(): Mock()})
+    def test_named_layer(self, named_layer):
+        assert named_layer.name == 'layer_name'
 
-    def test_layer_from_shape_valid_get_output(self, layer_from_shape):
-        layer = layer_from_shape
-        input = {layer: theano.tensor.matrix()}
-        assert layer.get_output(input) is input[layer]
+    def test_get_params(self, layer):
+        assert layer.get_params() == []
 
-    def test_create_param_numpy_bad_shape_raises_error(self, layer):
-        param = numpy.array([[1, 2, 3], [4, 5, 6]])
-        with pytest.raises(RuntimeError):
-            layer.create_param(param, (3, 2))
+    def test_get_params_tags(self, layer):
+        a_shape = (20, 50)
+        a = numpy.random.normal(0, 1, a_shape)
+        A = layer.add_param(a, a_shape, name='A', tag1=True, tag2=False)
 
-    def test_create_param_numpy_returns_shared(self, layer):
-        param = numpy.array([[1, 2, 3], [4, 5, 6]])
-        result = layer.create_param(param, (2, 3))
-        assert (result.get_value() == param).all()
-        assert isinstance(result, type(theano.shared(param)))
-        assert (result.get_value() == param).all()
+        b_shape = (30, 20)
+        b = numpy.random.normal(0, 1, b_shape)
+        B = layer.add_param(b, b_shape, name='B', tag1=True, tag2=True)
 
-    def test_create_param_shared_returns_same(self, layer):
-        param = theano.shared(numpy.array([[1, 2, 3], [4, 5, 6]]))
-        result = layer.create_param(param, (2, 3))
-        assert result is param
+        c_shape = (40, 10)
+        c = numpy.random.normal(0, 1, c_shape)
+        C = layer.add_param(c, c_shape, name='C', tag2=True)
 
-    def test_create_param_shared_bad_ndim_raises_error(self, layer):
-        param = theano.shared(numpy.array([[1, 2, 3], [4, 5, 6]]))
-        with pytest.raises(RuntimeError):
-            layer.create_param(param, (2, 3, 4))
+        assert layer.get_params() == [A, B, C]
+        assert layer.get_params(tag1=True) == [A, B]
+        assert layer.get_params(tag1=False) == [C]
+        assert layer.get_params(tag2=True) == [B, C]
+        assert layer.get_params(tag2=False) == [A]
+        assert layer.get_params(tag1=True, tag2=True) == [B]
 
-    def test_create_param_callable_returns_return_value(self, layer):
-        array = numpy.array([[1, 2, 3], [4, 5, 6]])
-        factory = Mock()
-        factory.return_value = array
-        result = layer.create_param(factory, (2, 3))
-        assert (result.get_value() == array).all()
-        factory.assert_called_with((2, 3))
+    def test_add_param_tags(self, layer):
+        a_shape = (20, 50)
+        a = numpy.random.normal(0, 1, a_shape)
+        A = layer.add_param(a, a_shape)
+        assert A in layer.params
+        assert 'trainable' in layer.params[A]
+        assert 'regularizable' in layer.params[A]
 
-    def test_named_layer(self):
+        b_shape = (30, 20)
+        b = numpy.random.normal(0, 1, b_shape)
+        B = layer.add_param(b, b_shape, trainable=False)
+        assert B in layer.params
+        assert 'trainable' not in layer.params[B]
+        assert 'regularizable' in layer.params[B]
+
+        c_shape = (40, 10)
+        c = numpy.random.normal(0, 1, c_shape)
+        C = layer.add_param(c, c_shape, tag1=True)
+        assert C in layer.params
+        assert 'trainable' in layer.params[C]
+        assert 'regularizable' in layer.params[C]
+        assert 'tag1' in layer.params[C]
+
+    def test_add_param_name(self, layer):
+        a_shape = (20, 50)
+        a = numpy.random.normal(0, 1, a_shape)
+        A = layer.add_param(a, a_shape, name='A')
+        assert A.name == 'A'
+
+    def test_add_param_named_layer_name(self, named_layer):
+        a_shape = (20, 50)
+        a = numpy.random.normal(0, 1, a_shape)
+        A = named_layer.add_param(a, a_shape, name='A')
+        assert A.name == 'layer_name.A'
+
+    def test_get_output_for_notimplemented(self, layer):
+        with pytest.raises(NotImplementedError):
+            layer.get_output_for(Mock())
+
+    def test_nonpositive_input_dims_raises_value_error(self, layer):
         from lasagne.layers.base import Layer
-        l = Layer(Mock(), name="foo")
-        assert l.name == "foo"
+        neg_input_layer = Mock(output_shape=(None, -1, -1))
+        zero_input_layer = Mock(output_shape=(None, 0, 0))
+        pos_input_layer = Mock(output_shape=(None, 1, 1))
+        with pytest.raises(ValueError):
+            Layer(neg_input_layer)
+        with pytest.raises(ValueError):
+            Layer(zero_input_layer)
+        Layer(pos_input_layer)
 
 
-class TestMultipleInputsLayer:
+class TestMergeLayer:
     @pytest.fixture
     def layer(self):
-        from lasagne.layers.base import MultipleInputsLayer
-        return MultipleInputsLayer([Mock(), Mock()])
+        from lasagne.layers.base import MergeLayer
+        return MergeLayer([Mock(), Mock()])
 
-    def test_get_output_shape(self, layer):
-        layer.get_output_shape_for = Mock()
-        result = layer.get_output_shape()
-        assert result is layer.get_output_shape_for.return_value
-        layer.get_output_shape_for.assert_called_with([
-            layer.input_layers[0].get_output_shape.return_value,
-            layer.input_layers[1].get_output_shape.return_value,
-            ])
-
-    def test_get_output_without_arguments(self, layer):
-        layer.get_output_for = Mock()
-
-        output = layer.get_output()
-        assert output is layer.get_output_for.return_value
-        layer.get_output_for.assert_called_with([
-            layer.input_layers[0].get_output.return_value,
-            layer.input_layers[1].get_output.return_value,
-            ])
-        layer.input_layers[0].get_output.assert_called_with(None)
-        layer.input_layers[1].get_output.assert_called_with(None)
-
-    def test_get_output_passes_on_arguments_to_input_layer(self, layer):
-        input, kwarg = object(), object()
-        layer.get_output_for = Mock()
-
-        output = layer.get_output(input, kwarg=kwarg)
-        assert output is layer.get_output_for.return_value
-        layer.get_output_for.assert_called_with([
-            layer.input_layers[0].get_output.return_value,
-            layer.input_layers[1].get_output.return_value,
-            ], kwarg=kwarg)
-        layer.input_layers[0].get_output.assert_called_with(
-            input, kwarg=kwarg)
-        layer.input_layers[1].get_output.assert_called_with(
-            input, kwarg=kwarg)
-
-    def test_get_output_input_is_a_mapping(self, layer):
-        input = {layer: theano.tensor.matrix()}
-        assert layer.get_output(input) is input[layer]
-
-    def test_get_output_input_is_a_mapping_no_key(self, layer):
-        layer.get_output_for = Mock()
-
-        output = layer.get_output({})
-        assert output is layer.get_output_for.return_value
-
-    def test_get_output_input_is_a_mapping_to_array(self, layer):
-        input = {layer: [[1, 2, 3]]}
-        output = layer.get_output(input)
-        assert numpy.all(output.eval() == input[layer])
+    def test_input_shapes(self, layer):
+        assert layer.input_shapes == [l.output_shape
+                                      for l in layer.input_layers]
 
     @pytest.fixture
     def layer_from_shape(self):
-        from lasagne.layers.base import MultipleInputsLayer
-        return MultipleInputsLayer([(None, 20), Mock()])
+        from lasagne.layers.input import InputLayer
+        from lasagne.layers.base import MergeLayer
+        return MergeLayer(
+            [(None, 20),
+             Mock(InputLayer((None,)), output_shape=(None,))]
+        )
 
     def test_layer_from_shape(self, layer_from_shape):
         layer = layer_from_shape
         assert layer.input_layers[0] is None
         assert layer.input_shapes[0] == (None, 20)
-        shape1 = layer.input_layers[1].get_output_shape()
         assert layer.input_layers[1] is not None
-        assert layer.input_shapes[1] == shape1
-        layer.get_output_shape_for = Mock()
-        result = layer.get_output_shape()
-        assert result is layer.get_output_shape_for.return_value
-        layer.get_output_shape_for.assert_called_with([
-            layer.input_shapes[0],
-            layer.input_layers[1].get_output_shape.return_value,
-            ])
+        assert (layer.input_shapes[1] == layer.input_layers[1].output_shape)
 
-    def test_layer_from_shape_invalid_get_output(self, layer_from_shape):
-        layer = layer_from_shape
-        with pytest.raises(RuntimeError):
-            layer.get_output()
-        with pytest.raises(RuntimeError):
-            layer.get_output(Mock())
-        with pytest.raises(RuntimeError):
-            layer.get_output({layer.input_layers[1]: Mock()})
+    def test_get_params(self, layer):
+        assert layer.get_params() == []
 
-    def test_layer_from_shape_valid_get_output(self, layer_from_shape):
-        layer = layer_from_shape
-        input = {layer: theano.tensor.matrix()}
-        assert layer.get_output(input) is input[layer]
+    def test_get_output_shape_for_notimplemented(self, layer):
+        with pytest.raises(NotImplementedError):
+            layer.get_output_shape_for(Mock())
+
+    def test_get_output_for_notimplemented(self, layer):
+        with pytest.raises(NotImplementedError):
+            layer.get_output_for(Mock())
